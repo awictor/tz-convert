@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TimeZone — time zone converter & meeting planner</title>
+<meta name="description" content="Free offline time zone converter. Pick a time in one zone and see it in cities around the world at once, with correct daylight-saving offsets and day differences. Great for scheduling across remote teams. Works offline, no signup.">
+<link rel="canonical" href="https://awictor.github.io/tz-convert/">
+<style>
+  :root{
+    --c:#075985; --bg:#f8f8f9; --fg:#18181b; --muted:#52525b;
+    --card:#ffffff; --border:#e4e4e7; --code:#efeff1;
+  }
+  [data-theme="dark"]{
+    --bg:#09090b; --fg:#e7e7ea; --muted:#8b8b93; --card:#151518;
+    --border:#27272a; --code:#1c1c20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{max-width:760px;margin:0 auto;padding:26px 20px 6px;display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--c),#0284c7);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:700}
+  h1{font-size:1.35rem;margin:0}
+  .sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}
+  .theme{margin-left:auto;background:none;border:1px solid var(--border);color:var(--fg);
+    border-radius:9px;padding:7px 11px;cursor:pointer;font-size:1rem}
+  main{max-width:760px;margin:0 auto;padding:8px 20px 60px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-top:18px}
+  label{display:block;font-weight:600;font-size:.82rem;margin:0 0 6px}
+  .row{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:12px;margin-bottom:8px}
+  input,select{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:11px;
+    background:var(--bg);color:var(--fg);font-size:1rem;font-family:inherit}
+  input:focus,select:focus{outline:2px solid var(--c);border-color:var(--c)}
+  .now{background:var(--code);border:1px solid var(--border);color:var(--fg);border-radius:9px;padding:7px 12px;cursor:pointer;font-size:.82rem;margin-top:6px}
+  table{width:100%;border-collapse:collapse;margin-top:16px}
+  th,td{padding:10px 8px;text-align:left;border-bottom:1px solid var(--border);font-size:.92rem}
+  th{font-size:.72rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+  td.time{font-family:ui-monospace,monospace;font-weight:700;font-size:1.05rem}
+  td.off{font-family:ui-monospace,monospace;color:var(--muted);font-size:.82rem}
+  .daydiff{color:var(--c);font-size:.75rem;font-weight:700}
+  tr.src td{background:var(--code)}
+  .hint{color:var(--muted);font-size:.82rem;margin:16px 0 0}
+  footer{max-width:760px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:.84rem}
+  footer a{color:var(--c)}
+  @media(max-width:520px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('tz.theme');
+   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))
+     document.documentElement.setAttribute('data-theme','dark');})();
+</script>
+<header>
+  <div class="logo">🌐</div>
+  <div>
+    <h1>TimeZone</h1>
+    <p class="sub">Time zone converter &amp; meeting planner</p>
+  </div>
+  <button class="theme" id="theme" title="Toggle theme">🌙</button>
+</header>
+<main>
+  <div class="panel">
+    <div class="row">
+      <div>
+        <label for="zone">From zone</label>
+        <select id="zone"></select>
+      </div>
+      <div><label for="date">Date</label><input id="date" type="date"></div>
+      <div><label for="time">Time</label><input id="time" type="time"></div>
+    </div>
+    <button class="now" id="now">Use current time</button>
+    <table>
+      <thead><tr><th>Zone</th><th>Local time</th><th style="text-align:right">Offset</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="hint">Offsets include daylight-saving time for the chosen date, computed from your browser's
+      time zone database — so "next Tuesday 9am in New York" lands on the right hour even across a DST switch.
+      "+1" / "−1" marks a different calendar day. 100% local.</p>
+  </div>
+</main>
+<footer>
+  TimeZone is part of the <a href="https://awictor.github.io/toolkit/">Toolkit</a> —
+  free, offline, no signup. · <a href="https://github.com/awictor/tz-convert">Source</a>
+</footer>
+
+<script>
+// ---- pure functions ----
+function zoneOffsetMinutes(timeZone, date){
+  var dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: timeZone, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+  var m = {};
+  dtf.formatToParts(date).forEach(function(p){ m[p.type] = p.value; });
+  var h = (+m.hour) % 24;
+  var asUTC = Date.UTC(+m.year, +m.month - 1, +m.day, h, +m.minute, +m.second);
+  return Math.round((asUTC - date.getTime()) / 60000);
+}
+function wallTimeToInstant(timeZone, y, mo, d, h, mi){
+  var guess = Date.UTC(y, mo - 1, d, h, mi, 0);
+  var off = zoneOffsetMinutes(timeZone, new Date(guess));
+  var inst = guess - off * 60000;
+  var off2 = zoneOffsetMinutes(timeZone, new Date(inst));
+  if(off2 !== off) inst = guess - off2 * 60000;   // refine across DST boundary
+  return new Date(inst);
+}
+function partsInZone(date, timeZone){
+  var dtf = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timeZone, hour12: false, weekday: 'short',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  });
+  var m = {};
+  dtf.formatToParts(date).forEach(function(p){ m[p.type] = p.value; });
+  var hh = m.hour === '24' ? '00' : m.hour;
+  return { date: m.year + '-' + m.month + '-' + m.day, time: hh + ':' + m.minute, weekday: m.weekday };
+}
+function offsetLabel(minutes){
+  var sign = minutes < 0 ? '-' : '+';
+  var abs = Math.abs(minutes);
+  var h = Math.floor(abs / 60), m = abs % 60;
+  return 'UTC' + sign + String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+function dayDiff(fromDateStr, toDateStr){
+  var a = Date.UTC.apply(null, fromDateStr.split('-').map(Number).map(function(v, i){ return i === 1 ? v - 1 : v; }));
+  var b = Date.UTC.apply(null, toDateStr.split('-').map(Number).map(function(v, i){ return i === 1 ? v - 1 : v; }));
+  return Math.round((b - a) / 86400000);
+}
+
+if(typeof module !== 'undefined') module.exports = { zoneOffsetMinutes, wallTimeToInstant, partsInZone, offsetLabel, dayDiff };
+
+// ---- UI ----
+if(typeof document !== 'undefined' && document.getElementById){
+  var ZONES = [
+    ['Pacific/Honolulu', 'Honolulu'], ['America/Los_Angeles', 'Los Angeles'], ['America/Denver', 'Denver'],
+    ['America/Chicago', 'Chicago'], ['America/New_York', 'New York'], ['America/Sao_Paulo', 'São Paulo'],
+    ['UTC', 'UTC'], ['Europe/London', 'London'], ['Europe/Paris', 'Paris'], ['Europe/Athens', 'Athens'],
+    ['Africa/Johannesburg', 'Johannesburg'], ['Asia/Dubai', 'Dubai'], ['Asia/Kolkata', 'Mumbai'],
+    ['Asia/Singapore', 'Singapore'], ['Asia/Shanghai', 'Shanghai'], ['Asia/Tokyo', 'Tokyo'],
+    ['Australia/Sydney', 'Sydney'], ['Pacific/Auckland', 'Auckland']
+  ];
+  var local = 'UTC';
+  try{ local = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }catch(e){}
+  if(!ZONES.some(function(z){ return z[0] === local; })) ZONES.unshift([local, local + ' (local)']);
+
+  var zoneEl = document.getElementById('zone');
+  var dateEl = document.getElementById('date');
+  var timeEl = document.getElementById('time');
+  var rowsEl = document.getElementById('rows');
+  zoneEl.innerHTML = ZONES.map(function(z){ return '<option value="' + z[0] + '"' + (z[0] === local ? ' selected' : '') + '>' + z[1] + '</option>'; }).join('');
+
+  function setNow(){
+    if(!zoneEl.value) return;
+    var p = partsInZone(new Date(), zoneEl.value);
+    dateEl.value = p.date; timeEl.value = p.time;
+  }
+  function render(){
+    if(!zoneEl.value || !dateEl.value || !timeEl.value) return;
+    var dp = dateEl.value.split('-').map(Number);
+    var tp = timeEl.value.split(':').map(Number);
+    var instant = wallTimeToInstant(zoneEl.value, dp[0], dp[1], dp[2], tp[0], tp[1]);
+    var srcDate = dateEl.value;
+    rowsEl.innerHTML = ZONES.map(function(z){
+      var p = partsInZone(instant, z[0]);
+      var off = zoneOffsetMinutes(z[0], instant);
+      var dd = dayDiff(srcDate, p.date);
+      var ddLabel = dd === 0 ? '' : ' <span class="daydiff">' + (dd > 0 ? '+' + dd : dd) + 'd</span>';
+      var isSrc = z[0] === zoneEl.value;
+      return '<tr' + (isSrc ? ' class="src"' : '') + '><td>' + z[1] + '</td>' +
+        '<td class="time">' + p.weekday + ' ' + p.time + ddLabel + '</td>' +
+        '<td class="off" style="text-align:right">' + offsetLabel(off) + '</td></tr>';
+    }).join('');
+    try{ localStorage.setItem('tz.zone', zoneEl.value); localStorage.setItem('tz.date', dateEl.value); localStorage.setItem('tz.time', timeEl.value); }catch(e){}
+  }
+  [zoneEl, dateEl, timeEl].forEach(function(x){ x.addEventListener('input', render); });
+  document.getElementById('now').addEventListener('click', function(){ setNow(); render(); });
+
+  try{
+    var z = localStorage.getItem('tz.zone'), d = localStorage.getItem('tz.date'), t = localStorage.getItem('tz.time');
+    if(z) zoneEl.value = z;
+    if(d && t){ dateEl.value = d; timeEl.value = t; } else setNow();
+  }catch(e){ setNow(); }
+  render();
+
+  var themeBtn = document.getElementById('theme');
+  function syncIcon(){
+    themeBtn.textContent =
+      document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+  }
+  syncIcon();
+  themeBtn.addEventListener('click', function(){
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if(dark){ document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('tz.theme','light'); }
+    else { document.documentElement.setAttribute('data-theme','dark');
+      localStorage.setItem('tz.theme','dark'); }
+    syncIcon();
+  });
+}
+</script>
+</body>
+</html>
